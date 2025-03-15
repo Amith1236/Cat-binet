@@ -4,13 +4,13 @@ import numpy as np
 import requests
 import re
 
-# Set your IP Webcam URL
-IP_WEBCAM_URL = "http://10.32.53.114:8080/shot.jpg"  # Replace with your phone's IP
+IP_WEBCAM_URL = "http://phoneIP:8080/shot.jpg" 
 
-# Configure Tesseract OCR path if needed (for Windows)
-pytesseract.pytesseract.tesseract_cmd = r'C:\Users\amith\AppData\Local\Programs\Tesseract-OCR\tesseract.exe'
 
-# Define regex for expiry date (common formats like MM/YYYY, DD/MM/YYYY)
+# Configure Tesseract OCR
+pytesseract.pytesseract.tesseract_cmd = r"C:\Users\amith\AppData\Local\Programs\Tesseract-OCR\tesseract.exe"
+
+
 expiry_date_pattern = r'\b\d{1,2} (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{4}\b'
 
 def preprocess_image(frame):
@@ -34,7 +34,7 @@ def extract_text_regions(frame):
         x, y, w, h = cv2.boundingRect(contour)
         if w > 30 and h > 10:  # Filter small noise
             roi = frame[y:y+h, x:x+w]
-            text_regions.append(roi)
+            text_regions.append((roi, (x, y, w, h)))  # Return bounding box info
     
     return text_regions
 
@@ -44,8 +44,9 @@ def extract_text_from_frame(frame):
     # Get text regions
     text_regions = extract_text_regions(frame)
     extracted_text = ""
+    expiry_box = None  # Store bounding box of expiry date
 
-    for region in text_regions:
+    for region, (x, y, w, h) in text_regions:
         # OCR with better config
         custom_config = r'--oem 3 --psm 11'  # Mode 11 for scattered text
         text = pytesseract.image_to_string(region, config=custom_config)
@@ -55,11 +56,15 @@ def extract_text_from_frame(frame):
 
         extracted_text += text + "\n"
 
+        # Check if this text contains the expiry date
+        if re.search(expiry_date_pattern, text):
+            expiry_box = (x, y, w, h)
+
     # Extract expiry date
     expiry_date_match = re.search(expiry_date_pattern, extracted_text)
     expiry_date = expiry_date_match.group() if expiry_date_match else "Not Found"
 
-    return extracted_text.strip(), expiry_date
+    return extracted_text.strip(), expiry_date, expiry_box
 
 def main():
     while True:
@@ -70,7 +75,7 @@ def main():
             frame = cv2.imdecode(img_arr, -1)
 
             # Extract text and expiry date
-            text, expiry_date = extract_text_from_frame(frame)
+            text, expiry_date, expiry_box = extract_text_from_frame(frame)
 
             # Print cleaned detected text
             print("\n===== Detected Text =====")
@@ -78,9 +83,12 @@ def main():
             print("===== Expiry Date =====")
             print(expiry_date)
 
-            # Overlay expiry date on frame
-            cv2.putText(frame, f"Expiry: {expiry_date}", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 
-                        1, (0, 255, 0), 2, cv2.LINE_AA)
+            # Draw bounding box if expiry date is found
+            if expiry_box:
+                x, y, w, h = expiry_box
+                cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)  # Green box
+                cv2.putText(frame, f"Expiry: {expiry_date}", (x, y - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2, cv2.LINE_AA)
 
             # Show the video feed
             cv2.imshow("Medicine Scanner", frame)
